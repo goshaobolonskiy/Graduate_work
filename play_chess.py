@@ -3,6 +3,7 @@ import pygame
 import sys
 import numpy as np
 from tensorflow.keras.models import load_model
+import time
 
 # Загрузка модели
 model = load_model('chess_ai_model.h5')
@@ -47,13 +48,11 @@ def draw_board(board):
                 screen.blit(piece_image, (j * SQUARE_SIZE, i * SQUARE_SIZE))
 
 def transform_pawn(move, board):
-    # Проверка, является ли текущий ход превращением пешки
     if board.piece_type_at(move.from_square) == chess.PAWN:
         if (board.color_at(move.from_square) == chess.WHITE and move.to_square // 8 == 7) or \
            (board.color_at(move.from_square) == chess.BLACK and move.to_square // 8 == 0):
-            # Превращение пешки в ферзя
             return chess.Move(move.from_square, move.to_square, promotion=chess.QUEEN)
-    return move  # Если превращения не происходит, возвращаем оригинальный ход
+    return move
 
 def evaluate_board(board):
     material_count = {
@@ -107,6 +106,14 @@ def best_move(board, depth):
 
     return best_move
 
+def display_game_over_message(message):
+    font = pygame.font.Font(None, 74)
+    text = font.render(message, True, (0, 0, 0))
+    text_rect = text.get_rect(center=(WIDTH // 2, HEIGHT // 2))
+    screen.blit(text, text_rect)
+    pygame.display.flip()
+    pygame.time.wait(3000)  # Ждем 3 секунды перед выходом
+
 def main():
     board = chess.Board()
     selected_square = None
@@ -141,15 +148,48 @@ def main():
                         # Обработка превращения пешки
                         move = transform_pawn(move, board)
                         if move in board.legal_moves:
-                            print(move)
                             board.push(move)  # Выполняем ход на доске
                             dragging_piece = None
                             selected_square = None
+
+                            # Проверка на окончание игры
+                            if board.is_checkmate():
+                                draw_board(board)
+                                display_game_over_message("Мат! Белые выиграли!")
+                                pygame.quit()
+                                sys.exit()
+                            elif board.is_stalemate():
+                                draw_board(board)
+                                display_game_over_message("Ничья!")
+                                pygame.quit()
+                                sys.exit()
+                            elif board.is_insufficient_material():
+                                draw_board(board)
+                                display_game_over_message("Ничья! Мало материала!")
+                                pygame.quit()
+                                sys.exit()
 
                             # Ход AI
                             ai_move = best_move(board, 3)
                             if ai_move:
                                 board.push(ai_move)
+
+                            # Проверка на окончание игры после хода AI
+                            if board.is_checkmate():
+                                draw_board(board)
+                                display_game_over_message("Мат! Черные выиграли!")
+                                pygame.quit()
+                                sys.exit()
+                            elif board.is_stalemate():
+                                draw_board(board)
+                                display_game_over_message("Ничья!")
+                                pygame.quit()
+                                sys.exit()
+                            elif board.is_insufficient_material():
+                                draw_board(board)
+                                display_game_over_message("Ничья! Мало материала!")
+                                pygame.quit()
+                                sys.exit()
                         else:
                             dragging_piece = None
                             selected_square = None
