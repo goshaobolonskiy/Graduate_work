@@ -34,7 +34,6 @@ screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Шахматы против НС")
 clock = pygame.time.Clock()
 
-
 def draw_board(board):
     for i in range(8):
         for j in range(8):
@@ -44,29 +43,17 @@ def draw_board(board):
             piece = board.piece_at(i * 8 + j)
             if piece:
                 piece_image = PIECE_IMAGES[piece.symbol()]
-                piece_image = pygame.transform.scale(piece_image,
-                                                     (SQUARE_SIZE, SQUARE_SIZE))  # Масштабируем изображение
+                piece_image = pygame.transform.scale(piece_image, (SQUARE_SIZE, SQUARE_SIZE))
                 screen.blit(piece_image, (j * SQUARE_SIZE, i * SQUARE_SIZE))
 
-
-def board_to_array(board):
-    array = np.zeros((8, 8, 12))
-    piece_map = board.piece_map()
-
-    for square, piece in piece_map.items():
-        layer = piece.piece_type - 1
-        color = 1 if piece.color == chess.WHITE else -1
-        array[square // 8, square % 8, layer] = color
-
-    return array
-
-
-def predict_move(board):
-    position_array = board_to_array(board)
-    position_array = np.expand_dims(position_array, axis=0)
-    prediction = model.predict(position_array)
-    return prediction  # Вернуть предсказание для дальнейшей обработки
-
+def transform_pawn(move, board):
+    # Проверка, является ли текущий ход превращением пешки
+    if board.piece_type_at(move.from_square) == chess.PAWN:
+        if (board.color_at(move.from_square) == chess.WHITE and move.to_square // 8 == 7) or \
+           (board.color_at(move.from_square) == chess.BLACK and move.to_square // 8 == 0):
+            # Превращение пешки в ферзя
+            return chess.Move(move.from_square, move.to_square, promotion=chess.QUEEN)
+    return move  # Если превращения не происходит, возвращаем оригинальный ход
 
 def evaluate_board(board):
     material_count = {
@@ -83,7 +70,6 @@ def evaluate_board(board):
         score -= len(board.pieces(piece_type, chess.BLACK)) * material_count[piece_type]
 
     return score
-
 
 def minimax(board, depth, maximizing_player):
     if depth == 0 or board.is_game_over():
@@ -106,7 +92,6 @@ def minimax(board, depth, maximizing_player):
             min_eval = min(min_eval, eval)
         return min_eval
 
-
 def best_move(board, depth):
     best_eval = float('-inf')
     best_move = None
@@ -121,17 +106,6 @@ def best_move(board, depth):
             best_move = move
 
     return best_move
-
-
-def transform_pawn(move, board):
-    # Проверка, является ли текущий ход превращением пешки и возвращаем соответствующий ход
-    if board.piece_type_at(move.from_square) == chess.PAWN:
-        if (board.color_at(move.from_square) == chess.WHITE and move.to_square // 8 == 7) or \
-           (board.color_at(move.from_square) == chess.BLACK and move.to_square // 8 == 0):
-            # Превращение пешки в ферзя
-            return chess.Move(move.from_square, move.to_square, promotion=chess.QUEEN)
-    return move  # Если превращения не происходит, возвращаем оригинальный ход
-
 
 def main():
     board = chess.Board()
@@ -164,11 +138,15 @@ def main():
                     if new_square != selected_square:
                         move = chess.Move.from_uci(
                             f"{chess.square_name(selected_square)}{chess.square_name(new_square)}")
+                        # Обработка превращения пешки
+                        move = transform_pawn(move, board)
                         if move in board.legal_moves:
-                            move = transform_pawn(move, board)  # Здесь обрабатываем превращение пешки
+                            print(move)
                             board.push(move)  # Выполняем ход на доске
                             dragging_piece = None
                             selected_square = None
+
+                            # Ход AI
                             ai_move = best_move(board, 3)
                             if ai_move:
                                 board.push(ai_move)
@@ -179,7 +157,6 @@ def main():
             if event.type == pygame.MOUSEMOTION:
                 if dragging_piece:  # Обработка перетаскивания
                     screen.fill((255, 255, 255))
-
                     draw_board(board)  # Отрисовываем доску
                     mouse_x, mouse_y = event.pos
                     piece_image = PIECE_IMAGES[dragging_piece.symbol()]
@@ -189,7 +166,6 @@ def main():
         draw_board(board)
         pygame.display.flip()
         clock.tick(60)
-
 
 if __name__ == '__main__':
     main()
