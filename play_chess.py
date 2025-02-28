@@ -124,18 +124,19 @@ def best_move(board, depth):
 
 
 def transform_pawn(move, board):
+    # Проверка, является ли текущий ход превращением пешки и возвращаем соответствующий ход
     if board.piece_type_at(move.from_square) == chess.PAWN:
         if (board.color_at(move.from_square) == chess.WHITE and move.to_square // 8 == 7) or \
-                (board.color_at(move.from_square) == chess.BLACK and move.to_square // 8 == 0):
-            # Превращение пешки в ферзя (можно добавить выбор фигуры)
+           (board.color_at(move.from_square) == chess.BLACK and move.to_square // 8 == 0):
+            # Превращение пешки в ферзя
             return chess.Move(move.from_square, move.to_square, promotion=chess.QUEEN)
-    return move  # Возвращаем оригинальный ход, если превращения не происходит
+    return move  # Если превращения не происходит, возвращаем оригинальный ход
 
 
 def main():
     board = chess.Board()
     selected_square = None
-    dragging_piece = None  # Переменная для хранения перетаскиваемой фигуры
+    dragging_piece = None
 
     while True:
         for event in pygame.event.get():
@@ -150,7 +151,7 @@ def main():
 
                 if board.color_at(y * 8 + x) == chess.WHITE:  # Проверяем, что выбрана белая фигура
                     selected_square = y * 8 + x
-                    dragging_piece = board.piece_at(selected_square)  # Сохраняем фигуру для перетаскивания
+                    dragging_piece = board.piece_at(selected_square)
 
             if event.type == pygame.MOUSEBUTTONUP:
                 if dragging_piece:  # Если фигура перетаскивается
@@ -159,35 +160,31 @@ def main():
                     y //= SQUARE_SIZE
                     new_square = y * 8 + x
 
-                    # Проверка на недопустимые ходы
-                    if new_square != selected_square:  # Проверяем, что новая клетка отличается от оригинальной
+                    # Проверяем, отличается ли новая клетка от старой
+                    if new_square != selected_square:
                         move = chess.Move.from_uci(
                             f"{chess.square_name(selected_square)}{chess.square_name(new_square)}")
                         if move in board.legal_moves:
-                            move = transform_pawn(move, board)  # Обработка превращения пешки
-                            board.push(move)
-                            dragging_piece = None  # Сбрасываем перетаскиваемую фигуру
-                            selected_square = None  # Сбрасываем выделение
-                            # Ход AI
+                            move = transform_pawn(move, board)  # Здесь обрабатываем превращение пешки
+                            board.push(move)  # Выполняем ход на доске
+                            dragging_piece = None
+                            selected_square = None
                             ai_move = best_move(board, 3)
                             if ai_move:
                                 board.push(ai_move)
                         else:
-                            dragging_piece = None  # Сбрасываем перетаскиваемую фигуру
-                            selected_square = None  # Сбрасываем выделение
+                            dragging_piece = None
+                            selected_square = None
 
             if event.type == pygame.MOUSEMOTION:
                 if dragging_piece:  # Обработка перетаскивания
-                    # Обновление позиции перетаскиваемой фигуры
-                    screen.fill((255, 255, 255))  # Очищаем экран перед отрисовкой
+                    screen.fill((255, 255, 255))
 
                     draw_board(board)  # Отрисовываем доску
-                    mouse_x, mouse_y = event.pos  # Получаем координаты мыши
+                    mouse_x, mouse_y = event.pos
                     piece_image = PIECE_IMAGES[dragging_piece.symbol()]
-                    piece_image = pygame.transform.scale(piece_image,
-                                                         (SQUARE_SIZE, SQUARE_SIZE))  # Масштабируем изображение
-                    screen.blit(piece_image, (mouse_x - SQUARE_SIZE // 2,
-                                              mouse_y - SQUARE_SIZE // 2))  # Отрисовываем фигуру под указателем мыши
+                    piece_image = pygame.transform.scale(piece_image, (SQUARE_SIZE, SQUARE_SIZE))
+                    screen.blit(piece_image, (mouse_x - SQUARE_SIZE // 2, mouse_y - SQUARE_SIZE // 2))
 
         draw_board(board)
         pygame.display.flip()
