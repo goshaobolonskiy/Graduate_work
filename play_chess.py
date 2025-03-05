@@ -2,11 +2,11 @@ import chess
 import pygame
 import sys
 import numpy as np
-from tensorflow.keras.models import load_model
+from tensorflow import keras
 import time
 
 # Загрузка модели
-model = load_model('chess_ai_model.h5')
+model = keras.models.load_model('chess_model.keras')
 
 # Определяем размеры доски и цветовые схемы
 WIDTH, HEIGHT = 640, 640
@@ -54,57 +54,74 @@ def transform_pawn(move, board):
             return chess.Move(move.from_square, move.to_square, promotion=chess.QUEEN)
     return move
 
-def evaluate_board(board):
-    material_count = {
-        chess.PAWN: 1,
-        chess.KNIGHT: 3,
-        chess.BISHOP: 3,
-        chess.ROOK: 5,
-        chess.QUEEN: 9,
+def fen_to_array(fen):
+    """Преобразует FEN в numpy array."""
+    piece_map = {
+        'p': [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        'r': [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        'n': [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        'b': [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+        'q': [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+        'k': [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+        'P': [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+        'R': [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
+        'N': [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+        'B': [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
+        'Q': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
+        'K': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
     }
+    board_array = []
+    for row in fen.split(' ')[0].split('/'):
+        for cell in row:
+            if cell in piece_map:
+                board_array.extend(piece_map[cell])
+            elif cell.isdigit():
+                for _ in range(int(cell)):
+                    board_array.extend([0] * 12)  # Пустая клетка
+    return np.array(board_array)
 
-    score = 0
-    for piece_type in material_count.keys():
-        score += len(board.pieces(piece_type, chess.WHITE)) * material_count[piece_type]
-        score -= len(board.pieces(piece_type, chess.BLACK)) * material_count[piece_type]
+def move_to_one_hot(move_uci):
+    """Преобразует ход в формате UCI в one-hot encoding."""
+    # Создайте словарь для отображения UCI ходов в индексы
+    all_possible_moves = []
+    for from_square in chess.SQUARES:
+        for to_square in chess.SQUARES:
+            all_possible_moves.append(chess.Move(from_square, to_square).uci())
+            # Исправлено: используем chess.QUEEN, chess.ROOK и т.д.
+            for promotion in [chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT]:
+                all_possible_moves.append(chess.Move(from_square, to_square, promotion=promotion).uci())
 
-    return score
+    move_to_index = {move: i for i, move in enumerate(all_possible_moves)}
 
-def minimax(board, depth, maximizing_player):
-    if depth == 0 or board.is_game_over():
-        return evaluate_board(board)
+    one_hot = np.zeros(len(move_to_index))
+    if move_uci in move_to_index:
+        one_hot[move_to_index[move_uci]] = 1
+    return one_hot
+def predict_move(board, model):
+    """Предсказывает лучший ход для данной позиции, используя модель."""
+    fen = board.fen()
+    input_data = fen_to_array(fen).reshape(1, -1)  # reshape для соответствия входной форме модели
+    predictions = model.predict(input_data)[0]  # Получаем вероятности для всех ходов
 
-    if maximizing_player:
-        max_eval = float('-inf')
-        for move in board.legal_moves:
-            board.push(move)
-            eval = minimax(board, depth - 1, False)
-            board.pop()
-            max_eval = max(max_eval, eval)
-        return max_eval
-    else:
-        min_eval = float('inf')
-        for move in board.legal_moves:
-            board.push(move)
-            eval = minimax(board, depth - 1, True)
-            board.pop()
-            min_eval = min(min_eval, eval)
-        return min_eval
+    legal_moves = list(board.legal_moves)
+    legal_moves_uci = [move.uci() for move in legal_moves]
 
-def best_move(board, depth):
-    best_eval = float('-inf')
-    best_move = None
+    # Создаем список возможных ходов в формате UCI
+    all_possible_moves = []
+    for from_square in chess.SQUARES:
+        for to_square in chess.SQUARES:
+            all_possible_moves.append(chess.Move(from_square, to_square).uci())
+            for promotion in [chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT]:
+                all_possible_moves.append(chess.Move(from_square, to_square, promotion=promotion).uci())
 
-    for move in board.legal_moves:
-        board.push(move)
-        eval = minimax(board, depth - 1, False)
-        board.pop()
+    # Находим индексы допустимых ходов в списке всех возможных ходов
+    legal_move_indices = [i for i, move in enumerate(all_possible_moves) if move in legal_moves_uci]
 
-        if eval > best_eval:
-            best_eval = eval
-            best_move = move
+    # Выбираем лучший ход из допустимых на основе предсказаний модели
+    best_move_index = np.argmax(predictions[legal_move_indices])
+    best_legal_move_index = legal_move_indices[best_move_index]
 
-    return best_move
+    return all_possible_moves[best_legal_move_index]
 
 def display_game_over_message(message):
     font = pygame.font.Font(None, 74)
@@ -170,10 +187,22 @@ def main():
                                 sys.exit()
 
                             # Ход AI
-                            ai_move = best_move(board, 3)
-                            if ai_move:
-                                board.push(ai_move)
-
+                            try:
+                                ai_move_uci = predict_move(board, model)
+                                if ai_move_uci:
+                                    ai_move = chess.Move.from_uci(ai_move_uci)
+                                    board.push(ai_move)
+                            except Exception as e:
+                                print(f"Ошибка при ходе AI: {e}")
+                                #Если AI выдает ошибку, можно завершить игру или сделать случайный ход
+                                #Например:
+                                #legal_moves = list(board.legal_moves)
+                                #if legal_moves:
+                                #    board.push(random.choice(legal_moves))
+                                #else:
+                                #    display_game_over_message("Ничья из-за отсутствия ходов!")
+                                #    pygame.quit()
+                                #    sys.exit()
                             # Проверка на окончание игры после хода AI
                             if board.is_checkmate():
                                 draw_board(board)
@@ -195,7 +224,7 @@ def main():
                             selected_square = None
 
             if event.type == pygame.MOUSEMOTION:
-                if dragging_piece:  # Обработка перетаскивания
+                if dragging_piece:  # Обработка перетаски
                     screen.fill((255, 255, 255))
                     draw_board(board)  # Отрисовываем доску
                     mouse_x, mouse_y = event.pos
@@ -203,9 +232,9 @@ def main():
                     piece_image = pygame.transform.scale(piece_image, (SQUARE_SIZE, SQUARE_SIZE))
                     screen.blit(piece_image, (mouse_x - SQUARE_SIZE // 2, mouse_y - SQUARE_SIZE // 2))
 
-        draw_board(board)
-        pygame.display.flip()
-        clock.tick(60)
+            draw_board(board)
+            pygame.display.flip()
+            clock.tick(30)
 
 if __name__ == '__main__':
     main()
