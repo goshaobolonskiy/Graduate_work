@@ -1,3 +1,5 @@
+import asyncio
+
 import chess
 import chess.pgn
 import numpy as np
@@ -312,26 +314,14 @@ def select_move(board, depth=4):
     _, best_move = alphabeta(board, depth, -float('inf'), float('inf'), board.turn == chess.WHITE)
     return best_move
 
+async def async_select_move(board, depth):
+    loop = asyncio.get_event_loop()
+    move = await loop.run_in_executor(None, select_move, board.copy(), depth)
+    return move
+
 # ==========================
 # 6. Игра против движка
 # ==========================
-
-def user_move(board):
-    while True:
-        move = input("Ваш ход (например, e2e4): ")
-        try:
-            move_obj = board.parse_san(move)
-        except ValueError:
-            try:
-                move_obj = board.parse_uci(move)
-            except ValueError:
-                print("Некорректный ход, попробуйте снова.")
-                continue
-        if move_obj in board.legal_moves:
-            return move_obj
-        else:
-            print("Недопустимый ход. Попробуйте снова.")
-
 
  # Реализация хода игроком
 def get_square_under_mouse(pos):
@@ -354,24 +344,25 @@ def highlight_square(screen, square, color=(0,255,0)):
 
 
 
-def play_game(mode='human_vs_bot', depth=4):
-    import pygame
-    import chess
+import asyncio
+import pygame
+import chess
 
+async def play_game(mode='human_vs_bot', depth=6):
     # Инициализация
     SQUARE_SIZE = 80
     pygame.init()
     screen = pygame.display.set_mode((SQUARE_SIZE*8, SQUARE_SIZE*8))
     pygame.display.set_caption("Chess")
-    clock = pygame.time.Clock()
 
     # Настройки сторон
-    white_player = 'human'  # 'human' или 'bot'
-    black_player = 'bot'
+    white_player = 'human'  # или 'bot'
+    black_player = 'bot'    # или 'human'
     board = chess.Board()
 
     selected_square = None
     valid_moves_for_selected = []
+
 
     def draw_board():
         colors = ["#f0d9b5", "#b58863"]
@@ -384,9 +375,10 @@ def play_game(mode='human_vs_bot', depth=4):
                 square = chess.square(c, 7 - r)
                 piece = board.piece_at(square)
                 if piece:
-                    img = PIECE_IMAGES[piece.symbol()]
-                    img = pygame.transform.scale(img, (SQUARE_SIZE, SQUARE_SIZE))
-                    screen.blit(img, (c * SQUARE_SIZE, r * SQUARE_SIZE))
+                    img = PIECE_IMAGES.get(piece.symbol())
+                    if img:
+                        img_scaled = pygame.transform.scale(img, (SQUARE_SIZE, SQUARE_SIZE))
+                        screen.blit(img_scaled, (c * SQUARE_SIZE, r * SQUARE_SIZE))
         # Выделение выбранной клетки
         if selected_square is not None:
             c = selected_square % 8
@@ -403,16 +395,20 @@ def play_game(mode='human_vs_bot', depth=4):
 
         pygame.display.flip()
 
-    def get_square_under_mouse(pos):
-        c = pos[0] // SQUARE_SIZE
-        r = pos[1] // SQUARE_SIZE
-        if 0 <= c < 8 and 0 <= r < 8:
-            return chess.square(c, 7 - r)
-        return None
+
+    async def process_bot_move():
+        move = await async_select_move(board, depth)
+        print(f"{'Белые' if board.turn == chess.WHITE else 'Черные'} делают ход: {board.san(move)}")
+        board.push(move)
+        draw_board()
+
+    async def async_select_move(board, depth):
+        loop = asyncio.get_event_loop()
+        move = await loop.run_in_executor(None, select_move, board.copy(), depth)
+        return move
 
     running = True
     while running:
-        # 1. Отрисовка доски в начале каждого цикла
         draw_board()
 
         for event in pygame.event.get():
@@ -420,7 +416,7 @@ def play_game(mode='human_vs_bot', depth=4):
                 running = False
                 break
             elif event.type == pygame.MOUSEBUTTONDOWN:
-                # Обработка клика для хода игрока
+                # Обработка клика
                 if ((board.turn == chess.WHITE and white_player == 'human') or
                     (board.turn == chess.BLACK and black_player == 'human')):
                     mouse_pos = pygame.mouse.get_pos()
@@ -429,18 +425,19 @@ def play_game(mode='human_vs_bot', depth=4):
                     square_clicked = chess.square(c, 7 - r)
 
                     piece = board.piece_at(square_clicked)
-
                     if selected_square is None:
                         # выбираем фигуру
-                        if piece and ((piece.color and board.turn == chess.WHITE) or (not piece.color and board.turn == chess.BLACK)):
+                        if piece and ((piece.color and board.turn == chess.WHITE) or
+                                      (not piece.color and board.turn == chess.BLACK)):
                             selected_square = square_clicked
-                            valid_moves_for_selected = [move for move in board.legal_moves if move.from_square == square_clicked]
+                            valid_moves_for_selected = [
+                                move for move in board.legal_moves if move.from_square == square_clicked
+                            ]
                     else:
                         # делаем ход
                         move = chess.Move(selected_square, square_clicked)
                         if move in valid_moves_for_selected:
                             board.push(move)
-                        # сбрасываем выделение
                         selected_square = None
                         valid_moves_for_selected = []
 
@@ -449,20 +446,15 @@ def play_game(mode='human_vs_bot', depth=4):
             print("Игра окончена:", board.result())
             break
 
-        # 2. После вашего хода или если ходит бот — делаете его
+        # Если текущий ход за бота
         if not board.is_game_over() and (
-            (board.turn == chess.WHITE and white_player == 'bot') or
-            (board.turn == chess.BLACK and black_player == 'bot')
+                (board.turn == chess.WHITE and white_player == 'bot') or
+                (board.turn == chess.BLACK and black_player == 'bot')
         ):
-            # задержка для зрелищности
-            pygame.time.delay(500)
-            move = select_move(board, depth=depth)
-            print(f"{'Белые' if board.turn == chess.WHITE else 'Черные'} делают ход: {board.san(move)}")
-            board.push(move)
-            # После хода бота — сразу обновляем доску и отображение
-            draw_board()
+            await asyncio.sleep(0.5)  # короткая задержка для плавности
+            await process_bot_move()
 
-        clock.tick(30)  # FPS
+        await asyncio.sleep(0.01)  # небольшая задержка для снижения нагрузки
 
 
 # =============================
@@ -481,5 +473,5 @@ if __name__ == '__main__':
     # Тут можно подготовить данные для обучения нейросети, пропускаем для простоты
 
     # Запуск игры
-    play_game()
+    asyncio.run(play_game())
     # play_self_play()
